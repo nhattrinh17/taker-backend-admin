@@ -2,7 +2,7 @@ import { Module, OnModuleInit } from '@nestjs/common';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { ConfigModule } from '@nestjs/config';
-import { FirebaseModule } from 'nestjs-firebase';
+import { ScheduleModule } from '@nestjs/schedule';
 import { FirebaseService } from '@common/services';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import connectionSource, { typeOrmConfig } from './config/typeorm';
@@ -25,6 +25,7 @@ import { ExportModule } from '@modules/export/export.module';
 import { DashboardModule } from '@modules/dashboard/dashboard.module';
 import { AuthenticationModule } from '@modules/authentication/authentication.module';
 import { PaymentModule } from '@modules/payment/payment.module';
+import { CronsModule } from '@modules/crons/crons.module';
 
 @Module({
   imports: [
@@ -48,6 +49,8 @@ import { PaymentModule } from '@modules/payment/payment.module';
       },
     }),
     EventEmitterModule.forRoot({ verboseMemoryLeak: true }),
+    ScheduleModule.forRoot(),
+    CronsModule,
     AuthenticationModule,
     ServicesModule,
     NotificationsModule,
