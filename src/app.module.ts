@@ -24,6 +24,7 @@ import { UploadModule } from '@modules/upload/upload.module';
 import { ExportModule } from '@modules/export/export.module';
 import { DashboardModule } from '@modules/dashboard/dashboard.module';
 import { AuthenticationModule } from '@modules/authentication/authentication.module';
+import { PaymentModule } from '@modules/payment/payment.module';
 
 @Module({
   imports: [
@@ -64,6 +65,9 @@ import { AuthenticationModule } from '@modules/authentication/authentication.mod
     UploadModule,
     ExportModule,
     DashboardModule,
+
+    // Payment
+    PaymentModule,
   ],
   controllers: [AppController],
   providers: [AppService, FirebaseService],
