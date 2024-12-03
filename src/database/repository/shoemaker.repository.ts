@@ -50,7 +50,7 @@ export class ShoemakerRepository extends BaseRepositoryAbstract<Shoemaker> imple
     };
   }
 
-  async findAllCustom(search: string, referralCode: string, status: string, isVerified: number, pagination: PaginationDto, sort: string, typeSort: 'ASC' | 'DESC'): Promise<any> {
+  async findAllCustom(search: string, referralCode: string, status: string, isVerified: number, isAvailable: number, pagination: PaginationDto, sort: string, typeSort: 'ASC' | 'DESC'): Promise<any> {
     const { limit, offset } = pagination;
 
     const condition = {};
@@ -67,6 +67,13 @@ export class ShoemakerRepository extends BaseRepositoryAbstract<Shoemaker> imple
       queryBuilder.andWhere('(shoemaker.fullName LIKE :keyword OR shoemaker.phone LIKE :keyword)', {
         keyword: `%${search}%`,
       });
+    }
+    if (isAvailable != undefined) {
+      if (isAvailable) {
+        queryBuilder.andWhere('shoemaker.isOnline = 1 AND shoemaker.isOn = 1');
+      } else {
+        queryBuilder.andWhere('shoemaker.isOnline = 0 OR shoemaker.isOn = 0');
+      }
     }
 
     queryBuilder.skip(offset).take(limit);

@@ -7,7 +7,7 @@ import { ShoemakersService } from './shoemakers.service';
 import { Pagination, PaginationDto } from '@common/decorators';
 
 @UseGuards(AdminsAuthGuard)
-@Controller('shoemakers')
+@Controller()
 export class ShoemakersController {
   constructor(private readonly service: ShoemakersService) {}
 
@@ -22,7 +22,7 @@ export class ShoemakersController {
   @Version('1')
   @Get('')
   listV2(@Pagination() pagination: PaginationDto, @Query(ValidationPipe) filter: SearchShoemakerV2Dto) {
-    return this.service.findAllShoemaker(filter.search, filter.referralCode, filter.status, filter.isVerified, pagination, filter.sort, filter.typeSort);
+    return this.service.findAllShoemaker(filter.search, filter.referralCode, filter.status, filter.isVerified, filter.isAvailable, pagination, filter.sort, filter.typeSort);
   }
 
   @HttpCode(HttpStatus.OK)

@@ -50,6 +50,11 @@ export class SearchShoemakerV2Dto extends PaginationDto {
   @IsOptional()
   @IsString()
   referralCode: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Transform(({ value }) => Number(value))
+  isAvailable: number;
 }
 
 export class CountShoemakerDto {

@@ -1,260 +1,143 @@
-import { getDatesByWeekOrMonth } from '@common/helpers/date.helper';
-import { Shoemaker } from '@entities/shoemaker.entity';
-import { BadRequestException, Inject, Injectable } from '@nestjs/common';
+import { Shoemaker } from '@entities/index';
+import { Injectable } from '@nestjs/common';
+import { BaseRepositoryAbstract } from 'src/base';
 import { InjectRepository } from '@nestjs/typeorm';
-import { And, Between, Equal, ILike, In, IsNull, Not, Repository } from 'typeorm';
-import { CountShoemakerDto, SearchShoemakerDto } from './dto/search-shoemakers.dto';
-import { UpdateInformationDto } from './dto/update-shoemakers.dto';
-import { ShoemakerStatusEnum } from '@common/enums';
-import { FirebaseService, SmsService } from '@common/services';
-import { ShoemakerRepositoryInterface } from 'src/database/interface/shoemaker.interface';
+import { Like, Repository } from 'typeorm';
+import { ShoemakerRepositoryInterface } from '../interface/Shoemaker.interface';
 import { PaginationDto } from '@common/decorators';
-import { messageResponseError } from '@common/constants';
-import { generateHashedPassword, generatePassword, makePhoneNumber } from '@common/helpers';
+import { StatusEnum } from '@common/enums';
 
 @Injectable()
-export class ShoemakersService {
+export class ShoemakerRepository extends BaseRepositoryAbstract<Shoemaker> implements ShoemakerRepositoryInterface {
   constructor(
     @InjectRepository(Shoemaker)
     private readonly shoemakerRepository: Repository<Shoemaker>,
-    private readonly firebaseService: FirebaseService,
-    @Inject('ShoemakerRepositoryInterface')
-    private readonly shoemakerRepositoryV1: ShoemakerRepositoryInterface,
-    private readonly smsService: SmsService,
-  ) {}
+  ) {
+    super(shoemakerRepository);
+  }
 
   async findShoemakerLongTimeNoActive(days: number, pagination: PaginationDto) {
-    return this.shoemakerRepositoryV1.findShoemakerLongTimeNoActive(days, pagination);
-  }
+    const { limit, offset } = pagination;
+    const dateThreshold = new Date();
+    dateThreshold.setDate(dateThreshold.getDate() - days);
 
-  /**
-   * Function to get a list of shoemakers
-   * @param params: SearchShoemakerDto
-   * @returns Return a list of shoemakers
-   */
-  async findList({ take, skip, status, start, end, keyword }: SearchShoemakerDto) {
-    try {
-      const dates = getDatesByWeekOrMonth('custom', start.toISOString(), end.toISOString());
+    const queryBuilder = this.shoemakerRepository
+      .createQueryBuilder('shoemaker')
+      .where((qb) => {
+        const subQuery = qb
+          .subQuery()
+          .select('trip.shoemakerId')
+          .from('Trip', 'trip')
+          .where('trip.status = :completedStatus', { completedStatus: StatusEnum.COMPLETED })
+          .groupBy('trip.shoemakerId')
+          .having('MAX(trip.date) >= :dateThreshold', { dateThreshold }) // So sánh với ngày gần nhất đặt đơn thành công
+          .getQuery();
 
-      const query = this.shoemakerRepository.createQueryBuilder('s');
-      query.select(['s.id', 's.phone', 's.status', 's.fullName', 's.createdAt']);
-      // Use addSelect to include the subquery for incomeSum
-      query.addSelect((subQuery) => {
-        return subQuery
-          .select("CONCAT(SUM(t.income), ',', COUNT(t.id))", 'incomeSumAndCount')
-          .from('trips', 't')
-          .where("t.shoemakerId = s.id AND t.status = 'COMPLETED'")
-          .andWhere({ date: In(dates) });
-      }, 'incomeSumAndCount');
+        return `shoemaker.id NOT IN ${subQuery}`;
+      })
+      .select(['shoemaker.id', 'shoemaker.phone', 'shoemaker.fullName', 'shoemaker.registrationDate', 'shoemaker.lastLoginDate'])
+      .skip(offset)
+      .take(limit);
 
-      query.addSelect((subQuery) => {
-        return subQuery
-          .select('COUNT(tc.shoemakerId)', 'tripCancellationCount')
-          .from('trip_cancellations', 'tc')
-          .where('tc.shoemakerId = s.id')
-          .andWhere({ date: In(dates) });
-      }, 'tripCancellationCount');
+    const [result, total] = await queryBuilder.getManyAndCount();
 
-      query.leftJoinAndSelect('s.wallet', 'wallet');
-
-      if (status) {
-        query.andWhere('s.status = :status', { status });
-      }
-
-      if (keyword) {
-        query.andWhere('(s.fullName LIKE :keyword OR s.phone LIKE :keyword)', {
-          keyword: `%${keyword}%`,
-        });
-      }
-      query.take(take);
-      query.skip(skip);
-      query.orderBy('s.createdAt', 'DESC');
-
-      // Use getRawAndEntities to get both raw data and entities
-      const { entities, raw } = await query.getRawAndEntities();
-
-      // Manually map the results to include incomeSum in your entities
-      const items = entities.map((entity, index) => {
-        const incomeSumAndCount = raw[index]?.incomeSumAndCount?.split(',')?.map(Number) ?? [0, 0];
-        const incomeSum = incomeSumAndCount[0]; // Default to 0 if null
-        const count = incomeSumAndCount[1]; //
-        return {
-          ...entity,
-          wallet: entity?.wallet?.balance,
-          incomeSum,
-          count,
-          tripCancellationCount: Number(raw[index].tripCancellationCount),
-        };
-      });
-      return { shoemakers: items };
-    } catch (e) {
-      throw new BadRequestException(e?.message);
-    }
-  }
-
-  async findAllShoemaker(search: string, referralCode: string, status: string, isVerified: number, pagination: PaginationDto, sort: string, typeSort: 'ASC' | 'DESC') {
-    try {
-      return this.shoemakerRepositoryV1.findAllCustom(search, referralCode, status, isVerified, pagination, sort, typeSort);
-    } catch (e) {
-      throw new BadRequestException(e?.message);
-    }
-  }
-
-  async getAllLocation() {
-    const condition = {
-      isVerified: 1,
-      status: ShoemakerStatusEnum.ACTIVE,
+    return {
+      data: result,
+      pagination: {
+        ...pagination,
+        total,
+      },
     };
-    const totalShoemaker = await this.shoemakerRepositoryV1.count(condition);
-
-    return this.shoemakerRepositoryV1.findAll(condition, {
-      projection: ['id', 'isTrip', 'phone', 'fullName', 'latitude', 'longitude', 'isOnline', 'isOn'],
-      limit: totalShoemaker,
-      offset: 0,
-      page: 1,
-    });
   }
 
-  /**
-   * Function to count shoemakers
-   * @param param: CountShoemakerDto
-   * @returns Count of shoemakers
-   */
-  async countRecords({ status, keyword }: CountShoemakerDto) {
-    try {
-      const query = this.shoemakerRepository.createQueryBuilder('s');
-      if (status) {
-        query.andWhere('s.status = :status', { status });
-      }
+  async findAllCustom(search: string, referralCode: string, status: string, isVerified: number, isAvailable: number, pagination: PaginationDto, sort: string, typeSort: 'ASC' | 'DESC'): Promise<any> {
+    const { limit, offset } = pagination;
 
-      if (keyword) {
-        query.andWhere('(s.fullName LIKE :keyword OR s.phone LIKE :keyword)', {
-          keyword: `%${keyword}%`,
-        });
-      }
-
-      return query.getCount();
-    } catch (e) {
-      throw new BadRequestException(e?.message);
-    }
-  }
-
-  /**
-   * Function to get a shoemaker
-   * @param id string
-   * @returns Return a shoemaker
-   */
-  async show(id: string) {
-    try {
-      const query = this.shoemakerRepository.createQueryBuilder('s');
-      query.where({ id });
-      // TODO Should make table to store income and count like rating_summary
-      query.addSelect((subQuery) => {
-        return subQuery.select("CONCAT(SUM(t.income), ',', COUNT(t.id))", 'incomeSumAndCount').from('trips', 't').where("t.shoemakerId = s.id AND t.status = 'COMPLETED'");
-      }, 'incomeSumAndCount');
-
-      query.addSelect((subQuery) => {
-        return subQuery.select('COUNT(tc.shoemakerId)', 'tripCancellationCount').from('trip_cancellations', 'tc').where('tc.shoemakerId = s.id');
-      }, 'tripCancellationCount');
-
-      query.addSelect((subQuery) => {
-        return subQuery.select('COUNT(ss.id)', 'referralCount').from('shoemakers', 'ss').where('ss.referralCode = s.phone');
-      }, 'referralCount');
-
-      query.leftJoinAndSelect('s.wallet', 'wallet');
-      query.leftJoinAndSelect('s.rating', 'rating');
-
-      // Use getRawAndEntities to get both raw data and entities
-      const { entities, raw } = await query.getRawAndEntities();
-      // Manually map the results to include incomeSum in your entities
-      const items = entities.map((entity, index) => {
-        const incomeSumAndCount = raw[index]?.incomeSumAndCount?.split(',')?.map(Number) ?? [0, 0];
-        const incomeSum = incomeSumAndCount[0];
-        const count = incomeSumAndCount[1];
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        const { password, fcmToken, ...filter } = entity;
-        return {
-          ...filter,
-          wallet: entity?.wallet?.balance,
-          totalIncome: incomeSum,
-          numberOfTrips: count,
-          numberOfCancelation: Number(raw[index].tripCancellationCount),
-          rating: {
-            average: entity?.rating?.average,
-            count: entity?.rating?.count,
-          },
-          referralCount: Number(raw[index].referralCount),
-        };
-      });
-
-      return items[0];
-    } catch (e) {
-      throw new BadRequestException(e?.message);
-    }
-  }
-
-  /**
-   * Function to update shoemaker information
-   * @param id string
-   * @param data UpdateInformationDto
-   * @returns return success if update success
-   */
-  async update(id: string, data: UpdateInformationDto) {
-    try {
-      const shoemaker = await this.shoemakerRepository.findOne({ where: { id: id } });
-      if (!shoemaker) {
-        throw new Error(messageResponseError.shoemaker.notFound);
-      }
-      // check duplicate
-      const condition = {
-        id: Not(id),
-        email: And(Not(IsNull()), Equal(data.email)),
-      };
-      const checkDuplicate = await this.shoemakerRepositoryV1.count(condition);
-      if (checkDuplicate) throw new Error(messageResponseError.shoemaker.emailHasExist);
-      await this.shoemakerRepository.update(id, data);
-      // Send notification when shoemaker is approved
-      if (data.status == ShoemakerStatusEnum.ACTIVE && shoemaker.fcmToken && shoemaker.status !== ShoemakerStatusEnum.ACTIVE) {
-        await this.firebaseService.send({
-          title: 'Taker',
-          body: 'Tài khoản của bạn đã được phê duyệt hãy vào lại app để có thể nhận đơn ngay',
-          token: shoemaker.fcmToken,
-          data: {
-            screen: 'UploadAvatar',
-          },
-        });
-      }
-      return 'Success';
-    } catch (e) {
-      throw new Error(e?.message);
-    }
-  }
-
-  getUserDownloadStatics(startDate: string, endDate: string) {
     const condition = {};
-    if (startDate && endDate) {
-      condition['registrationDate'] = Between(new Date(startDate), new Date(endDate));
+    if (referralCode) condition['referralCode'] = Like(`%${referralCode?.trim()}%`);
+    if (status) condition['status'] = status;
+    if (isVerified != undefined) condition['isVerified'] = Boolean(isVerified);
+
+    const queryBuilder = this.shoemakerRepository
+      .createQueryBuilder('shoemaker')
+      .leftJoinAndSelect('shoemaker.wallet', 'wallet') // Giả sử bạn có liên kết từ shoemaker sang Wallet
+      .where(condition);
+
+    if (search) {
+      queryBuilder.andWhere('(shoemaker.fullName LIKE :keyword OR shoemaker.phone LIKE :keyword)', {
+        keyword: `%${search}%`,
+      });
     }
-    return this.shoemakerRepositoryV1.getUserDownloadStatics(condition);
+    if (isAvailable != undefined) {
+      if (isAvailable) {
+        queryBuilder.andWhere('shoemaker.isOnline = 1 AND shoemaker.isOn = 1');
+      } else {
+        queryBuilder.andWhere('shoemaker.isOnline = 0 OR shoemaker.isOn = 0');
+      }
+    }
+
+    queryBuilder.skip(offset).take(limit);
+
+    if (sort) {
+      queryBuilder.orderBy(`shoemaker.${sort || 'createdAt'}`, typeSort || 'DESC');
+    }
+
+    const [data, total] = await queryBuilder.getManyAndCount();
+
+    return {
+      data,
+      pagination: {
+        ...pagination,
+        total,
+      },
+    };
   }
 
-  async resetPassword(id: string) {
-    try {
-      const customer = await this.shoemakerRepositoryV1.findOneById(id);
-      if (!customer) throw new Error(messageResponseError.shoemaker.notFound);
-      const password = generatePassword();
-      await this.shoemakerRepositoryV1.findByIdAndUpdate(id, {
-        password: generateHashedPassword(password.toString()),
-      });
-      const phoneNumber = makePhoneNumber(customer.phone);
-      await this.smsService.send({
-        toNumber: phoneNumber,
-        otp: password.toString(),
-      });
+  async findAllExport(condition: any, pagination: PaginationDto, sort: string, typeSort: 'ASC' | 'DESC'): Promise<any> {
+    const { limit, offset } = pagination;
 
-      return 'Password reset successfully';
-    } catch (error) {
-      console.log('🚀 ~ CustomerAdminService ~ resetPassword ~ error:', error);
+    const queryBuilder = this.shoemakerRepository
+      .createQueryBuilder('shoemaker')
+      .leftJoinAndSelect('shoemaker.wallet', 'wallet') // Liên kết với wallet
+      .where(condition)
+
+      .skip(offset)
+      .take(limit);
+
+    if (sort) {
+      queryBuilder.orderBy(`shoemaker.${sort}`, typeSort || 'DESC');
+    } else {
+      queryBuilder.orderBy('shoemaker.registrationDate', 'DESC');
     }
+
+    const [data, total] = await queryBuilder.getManyAndCount();
+
+    return {
+      data,
+      pagination: {
+        ...pagination,
+        total,
+      },
+    };
+  }
+
+  async getUserDownloadStatics(condition: any): Promise<any> {
+    return this.repository
+      .createQueryBuilder(Shoemaker.name)
+      .where(condition)
+      .select([
+        `COUNT(*) AS userCount`,
+        `COUNT(CASE WHEN ${Shoemaker.name}.referralCode IS NOT NULL THEN 1 END) AS referralCount`,
+        `COUNT(CASE WHEN ${Shoemaker.name}.referralCode IS NULL THEN 0 END) AS noCodeCount`,
+        `COUNT(CASE WHEN ${Shoemaker.name}.platform = 'ios' THEN 1 END) AS iosCount`,
+        `COUNT(CASE WHEN ${Shoemaker.name}.platform = 'android' THEN 1 END) AS androidCount`,
+        `COUNT(CASE WHEN ${Shoemaker.name}.platform = 'unknown' THEN 1 END) AS unknownDeviceCount`,
+        `COUNT(CASE WHEN ${Shoemaker.name}.isVerified = true THEN 1 END) AS verifiedCount`,
+        `COUNT(CASE WHEN ${Shoemaker.name}.isVerified = false THEN 0 END) AS unverifiedCount`,
+        `COUNT(CASE WHEN ${Shoemaker.name}.serviceShoe = true THEN 1 END) AS serviceShoeCount`,
+        `COUNT(CASE WHEN ${Shoemaker.name}.serviceBike = true THEN 1 END) AS serviceBikeCount`,
+        `COUNT(CASE WHEN ${Shoemaker.name}.serviceFood = true THEN 1 END) AS serviceFoodCount`,
+      ])
+      .getRawOne();
   }
 }
