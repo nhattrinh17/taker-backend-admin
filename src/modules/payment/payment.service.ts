@@ -8,6 +8,7 @@ import { Shoemaker } from '@entities/shoemaker.entity';
 import { Transaction } from '@entities/transaction.entity';
 import { Trip } from '@entities/trip.entity';
 import { Wallet } from '@entities/wallet.entity';
+import { SocketService } from '@modules/socket/socket.service';
 import { InjectQueue } from '@nestjs/bull';
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -22,7 +23,7 @@ export class PaymentService {
     @InjectRepository(Wallet)
     private readonly walletRepository: Repository<Wallet>,
     private readonly dataSource: DataSource,
-    // private readonly gatewaysService: GatewaysService,
+    private readonly socketService: SocketService,
     @InjectRepository(Trip)
     private readonly tripRepository: Repository<Trip>,
     private readonly firebaseService: FirebaseService,
@@ -180,17 +181,19 @@ export class PaymentService {
       if (!transaction) return;
 
       if (transaction?.wallet?.customerId || transaction?.wallet?.shoemakerId) {
-        // const socket = await this.gatewaysService.getSocket(
-        //   transaction?.wallet?.customerId || transaction?.wallet?.shoemakerId,
-        // );
-        // if (socket) {
-        //   console.log('[PAYMENT][UPDATE_STATUS_FOR_CLIENT]', { ...data });
-        //   socket.emit('payment-status', {
-        //     transactionId: data.vnp_TxnRef,
-        //     amount: Number(data.vnp_Amount) / 100,
-        //     status: data.vnp_ResponseCode,
-        //   });
-        // }
+        const socketId = await this.socketService.getSocketIdByUserId(transaction?.wallet?.customerId || transaction?.wallet?.shoemakerId);
+        if (socketId) {
+          console.log('[PAYMENT][UPDATE_STATUS_FOR_CLIENT]', { ...data });
+          await this.socketService.sendMessageToRoom({
+            data: {
+              transactionId: data.vnp_TxnRef,
+              amount: Number(data.vnp_Amount) / 100,
+              status: data.vnp_ResponseCode,
+            },
+            event: 'payment-status',
+            roomName: socketId,
+          });
+        }
       }
     } catch (e) {
       console.error('[PAYMENT][UPDATE_STATUS_FOR_CLIENT]', e);
@@ -200,15 +203,19 @@ export class PaymentService {
   async updateTripStatusForClient(trip: Trip, data: IReturnUrl) {
     try {
       const customerId = trip.customerId;
-      // const socket = await this.gatewaysService.getSocket(customerId);
-      // if (socket) {
-      //   console.log('[PAYMENT][UPDATE_TRIP_STATUS_FOR_CLIENT]', { ...data });
-      //   socket.emit('trip-status', {
-      //     transactionId: data.vnp_TxnRef,
-      //     amount: Number(data.vnp_Amount) / 100,
-      //     status: data.vnp_ResponseCode,
-      //   });
-      // }
+      const socketCustomerId = await this.socketService.getSocketIdByUserId(customerId);
+      if (socketCustomerId) {
+        console.log('[PAYMENT][UPDATE_TRIP_STATUS_FOR_CLIENT]', { ...data });
+        await this.socketService.sendMessageToRoom({
+          data: {
+            transactionId: data.vnp_TxnRef,
+            amount: Number(data.vnp_Amount) / 100,
+            status: data.vnp_ResponseCode,
+          },
+          event: 'trip-status',
+          roomName: socketCustomerId,
+        });
+      }
     } catch (e) {
       console.error('[PAYMENT][UPDATE_TRIP_STATUS_FOR_CLIENT]', e);
     }
