@@ -8,32 +8,21 @@ import { Transaction } from '@entities/transaction.entity';
 import { Trip } from '@entities/trip.entity';
 import { Wallet } from '@entities/wallet.entity';
 import { BullModule } from '@nestjs/bull';
-import {
-  MiddlewareConsumer,
-  Module,
-  NestModule,
-  RequestMethod,
-} from '@nestjs/common';
+import { MiddlewareConsumer, Module, NestModule, RequestMethod } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { TransactionLogListener } from './listeners/log.listenter';
 import { WhitelistMiddleware } from './middlware/whitelist-middleware';
 import { PaymentController } from './payment.controller';
 import { PaymentService } from './payment.service';
+import { SocketModule } from '@modules/socket/socket.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([
-      Transaction,
-      Wallet,
-      TransactionLog,
-      Trip,
-      Customer,
-      Notification,
-      Shoemaker,
-    ]),
+    TypeOrmModule.forFeature([Transaction, Wallet, TransactionLog, Trip, Customer, Notification, Shoemaker]),
     BullModule.registerQueue({
       name: QUEUE_NAMES.CUSTOMERS_TRIP,
     }),
+    SocketModule,
   ],
   controllers: [PaymentController],
   providers: [PaymentService, TransactionLogListener, FirebaseService],
