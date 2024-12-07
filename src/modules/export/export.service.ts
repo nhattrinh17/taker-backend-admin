@@ -216,7 +216,7 @@ export class ExportService {
       transactionSource: TransactionSource.WALLET,
     };
     if (startDate && endDate) {
-      condition['transactionDate'] = Between(new Date(startDate).toISOString(), new Date(endDate).toISOString());
+      condition['createdAt'] = Between(new Date(startDate).toISOString(), new Date(endDate).toISOString());
     }
 
     return this.transactionRepository.findAllWidthDrawExport(condition, pagination, sort, typeSort);
@@ -236,7 +236,7 @@ export class ExportService {
       transactionSource: TransactionSource.WALLET,
     };
     if (startDate && endDate) {
-      condition['transactionDate'] = Between(new Date(startDate).toISOString(), new Date(endDate).toISOString());
+      condition['createdAt'] = Between(new Date(startDate).toISOString(), new Date(endDate).toISOString());
     }
     const totalRecords = await this.transactionRepository.count(condition);
     const { data, pagination: paginationTg } = await this.findWithdraw(startDate, endDate, { limit: totalRecords, offset: 0, page: 1 }, '', 'DESC');

@@ -32,8 +32,8 @@ export class TripServiceRepository extends BaseRepositoryAbstract<TripService> i
 
     if (startDate && endDate) {
       queryBuilder.andWhere('trip.date BETWEEN :startDate AND :endDate', {
-        startDate,
-        endDate,
+        startDate: new Date(startDate).toISOString(),
+        endDate: new Date(endDate).toISOString(),
       });
     }
 
