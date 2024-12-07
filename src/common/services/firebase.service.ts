@@ -21,13 +21,13 @@ export class FirebaseService {
     });
   }
 
-  sendToAdmin({ tokens, title, body }: { tokens: string[]; title: string; body: string }) {
+  sendToAdmin({ tokens, title, body }: { tokens: string[]; title: string; body: string; url?: string }) {
     const messages: admin.messaging.Message[] = tokens.map((token) => {
       return {
         data: {
           title, // Sử dụng data thay vì notification
           body,
-          url: '/admin/realtime-order', // Thêm URL vào data nếu cần
+          url: '', // Thêm URL vào data nếu cần
         },
         token: token,
       };
